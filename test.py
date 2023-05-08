@@ -9,8 +9,10 @@ from nltk.corpus import stopwords
 #import os
 from sklearn.datasets import load_files
 import autokeras as ak
+#require cuda v11.4 and cuDNN v8.2
 from transformers import AutoTokenizer
 from transformers import GPT2Tokenizer
+from keras.utils import plot_model
 
 def label_t(label):
     if label == 'SUPPORTS':
@@ -32,8 +34,8 @@ with open('dataset/evidence.json') as json_file:
 with open('dataset/dev-claims.json') as json_file:
     dev_claim = json.load(json_file)
 
-with open('dataset/dev-claims-baseline.json') as json_file:
-    dev_claims_base = json.load(json_file)
+#with open('dataset/dev-claims-baseline.json') as json_file:
+    #dev_claims_base = json.load(json_file)
 
 with open('dataset/train-claims.json') as json_file:
     train = json.load(json_file)
@@ -61,36 +63,31 @@ bow_claim = vectorizer.fit_transform(claims_test).toarray()
 responds = []
 for i in train.keys():
     responds.append(train[i]['claim_label'])
-
+sens = []
+for i in dev_claim.keys():
+    sens.append(dev_claim[i]['claim_label'])
 
 tokenizer_gpt = GPT2Tokenizer.from_pretrained("gpt2")
 
 
-
+max_len = 0
 def gpt_vectorizer(input, tokenizer):
     #tokenizer = AutoTokenizer.from_pretrained("gpt2")
     responds = []
-    max_len = 0
-    for key in train.keys():
-        claim = train[key]['claim_label'].lower()
+    tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+    #max_len = 0
+    for key in input.keys():
+        claim = input[key]['claim_text'].lower()
         #if there is a sufficient way finding evidence, active two row below
-        #for evi in train[key]["evidences"]:
-            #claim = claim + evidence[evi]
+        if 'evidences' in input[key].keys():
+            for evi in input[key]["evidences"]:
+                claim = claim + evidence[evi]
         res = tokenizer(claim, padding=False, truncation=True)['input_ids']
-        #res = map(str, res)
-        
-        
-        
-        
-        
-        if len(res) > max_len:
-            max_len = len(res)
-        #res = ' '.join(res)
-        responds.append(train[key]['claim_label'].lower())
-    for record in responds:
-        if len(record) < max_len:
-            filler = [0]*(max_len-len(record))
-            record += filler 
+        res = map(str, res)
+        #if len(res) > max_len:
+            #max_len = len(res)
+        res = ' '.join(res)
+        responds.append(res)
     return responds
 
 #word_amount = list(set(word_amount))
@@ -105,18 +102,27 @@ def gpt_vectorizer(input, tokenizer):
 #for key in train.keys():
     #sentences.append(train[key]['claim_text'])
 sentences = gpt_vectorizer(train, tokenizer_gpt)
+sen = gpt_vectorizer(dev_claim, tokenizer_gpt)
 #print(sentences)
 #x_train = sentences
 x_train = np.array(sentences)
+x_valid = np.array(sen)
 y_train = np.array(responds)
-
+y_valid = np.array(sens)
+#print(x_train)
 #print(y_train)
+
+
 test_input = np.array(gpt_vectorizer(test, tokenizer_gpt))
 
 #print(x_train.shape)  
 #print(y_train.shape)  
-clf = ak.TextClassifier(max_trials=10)  
-clf.fit(x_train, y_train, epochs=10)
+clf = ak.TextClassifier(max_trials=3, multi_label=False,overwrite=True)  
+clf.fit(x_train, y_train, epochs=5,validation_data=(x_valid, y_valid))
+#model = clf.export_model()
+#model.summary()
+#plot_model(model)
+#clf.fit(x_train, y_train, epochs=10, validation_split = 0.3)
 #clf.save()
 prediction = clf.predict(test_input)
 
@@ -146,9 +152,6 @@ for key in train.keys():
     word = []
     for evi in train[key]['evidences']:
         word.append(evi[9:])
-        #print(evi)
-        #print(evi[9:])
-        #break
     word = ' '.join(word)
     w_evi.append(word)
     #print(word)
